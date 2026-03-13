@@ -17,16 +17,31 @@ const SYSTEM_PROMPT =
     \\1. `run_shell` - Execute a shell command on the user's machine. Use this to accomplish the user's task.
     \\   Arguments: {"command": "the shell command to run"}
     \\
-    \\2. `confirm` - Ask the user for confirmation before doing something potentially destructive.
-    \\   Arguments: {"message": "description of what you're about to do"}
+    \\2. `ask_user` - Ask the user a clarifying question when their request is ambiguous.
+    \\   Use ONLY for clarification, NEVER for confirming command execution (that is handled automatically).
+    \\   Arguments: {"question": "the question", "options": "[\"option A\", \"option B\"]", "recommended": "0"}
+    \\   - options: a JSON array of option strings for the user to choose from.
+    \\   - recommended: optional 0-based index of the recommended option.
+    \\   The user can pick a numbered option or type a custom answer.
     \\
     \\Guidelines:
-    \\- Break complex tasks into steps. Run one command, observe the output, then decide what to do next.
-    \\- ALWAYS use `confirm` before destructive operations (kill, rm -rf, drop database, etc).
-    \\- Use `run_shell` to investigate first (e.g., list processes, check files) before taking action.
+    \\- If the user's request is ambiguous, use `ask_user` to clarify before doing anything.
+    \\- Before running commands, briefly state your plan so the user can see your thinking.
+    \\- IMPORTANT: Emit ALL commands in a SINGLE response. Never split commands across
+    \\  multiple responses just to observe output between them.
+    \\  - Independent steps: use separate `run_shell` calls, one per command.
+    \\    Example: deleting 3 files → 3 separate `run_shell` calls in one response.
+    \\  - Dependent steps (where a later step needs an earlier step's output): use ONE
+    \\    `run_shell` call with a multi-line shell script using variables.
+    \\    Example: finding and killing a process →
+    \\      `run_shell("PID=$(lsof -t -i :3000)\nkill $PID")`
+    \\  - Only send a follow-up response if a command fails or produces unexpected output
+    \\    that requires a different approach.
     \\- Prefer safe, reversible approaches when possible.
     \\- Keep your text responses short and clear.
     \\- If a command fails, try to diagnose the issue and suggest alternatives.
+    \\- If the user declines to execute, stop immediately. Do not suggest alternatives,
+    \\  ask follow-up questions, or take any further action.
     \\- The user's operating system is detected automatically. Use appropriate commands.
     \\- Respond in the same language the user uses.
 ;
@@ -36,17 +51,19 @@ const TOOLS = [_]provider.Tool{
         .name = "run_shell",
         .description = "Execute a shell command on the user's machine and return its output.",
         .properties = &[_]provider.ToolProperty{
-            .{ .name = "command", .type = "string", .description = "The shell command to execute" },
+            .{ .name = "command", .type = "string", .description = "The shell command or multi-line script to execute" },
         },
         .required = &[_][]const u8{"command"},
     },
     .{
-        .name = "confirm",
-        .description = "Ask the user for confirmation before performing a potentially destructive action.",
+        .name = "ask_user",
+        .description = "Ask the user a clarifying question when their request is ambiguous. Do NOT use this for confirming command execution.",
         .properties = &[_]provider.ToolProperty{
-            .{ .name = "message", .type = "string", .description = "Description of the action to confirm" },
+            .{ .name = "question", .type = "string", .description = "The question to ask" },
+            .{ .name = "options", .type = "string", .description = "A JSON array of option strings, e.g. [\"option A\", \"option B\"]" },
+            .{ .name = "recommended", .type = "string", .description = "0-based index of the recommended option (optional)" },
         },
-        .required = &[_][]const u8{"message"},
+        .required = &[_][]const u8{ "question", "options" },
     },
 };
 
@@ -54,6 +71,12 @@ pub const AgentOptions = struct {
     confirm_mode: config_mod.ConfirmMode = .all,
     dry_run: bool = false,
     max_turns: usize = 20,
+};
+
+/// A queued shell command waiting to be confirmed and executed.
+const ShellCall = struct {
+    id: []const u8,
+    command: []const u8,
 };
 
 pub const Agent = struct {
@@ -90,11 +113,11 @@ pub const Agent = struct {
             // Call the LLM
             var response = try self.callLlm();
 
-            // Print any text content
+            // Print any text content (thinking display)
             for (response.message.content) |block| {
                 switch (block) {
                     .text => |text| {
-                        try self.stderr.print("{s}\n", .{text});
+                        try self.stderr.print("\x1b[90m~ {s}\x1b[0m\n", .{text});
                     },
                     else => {},
                 }
@@ -110,21 +133,131 @@ pub const Agent = struct {
             const cloned_msg = try self.cloneMessage(&response.message);
             try self.messages.append(self.allocator, cloned_msg);
 
-            // Process tool calls and collect results
+            // Separate tool calls into ask_user (immediate) and run_shell (batched)
+            // First, handle any ask_user calls immediately
             for (response.message.content) |block| {
                 switch (block) {
                     .tool_call => |tc| {
-                        const result = try self.executeTool(&tc);
-                        defer self.allocator.free(result);
+                        if (std.mem.eql(u8, tc.name, "ask_user")) {
+                            const result = try self.executeAskUserTool(tc.arguments);
+                            defer self.allocator.free(result);
+
+                            const tool_msg = try provider.Message.toolResult(
+                                self.allocator,
+                                tc.id,
+                                result,
+                            );
+                            try self.messages.append(self.allocator, tool_msg);
+                        }
+                    },
+                    else => {},
+                }
+            }
+
+            // Collect all run_shell calls into a batch
+            var shell_calls: std.ArrayList(ShellCall) = .empty;
+            defer shell_calls.deinit(self.allocator);
+
+            for (response.message.content) |block| {
+                switch (block) {
+                    .tool_call => |tc| {
+                        if (std.mem.eql(u8, tc.name, "run_shell")) {
+                            const command = extractJsonString(self.allocator, tc.arguments, "command") catch {
+                                // Append error result for malformed args
+                                const tool_msg = try provider.Message.toolResult(
+                                    self.allocator,
+                                    tc.id,
+                                    "Error: could not parse command from arguments.",
+                                );
+                                try self.messages.append(self.allocator, tool_msg);
+                                continue;
+                            };
+                            try shell_calls.append(self.allocator, .{
+                                .id = tc.id,
+                                .command = command,
+                            });
+                        } else if (!std.mem.eql(u8, tc.name, "ask_user")) {
+                            // Unknown tool
+                            const tool_msg = try provider.Message.toolResult(
+                                self.allocator,
+                                tc.id,
+                                "Unknown tool",
+                            );
+                            try self.messages.append(self.allocator, tool_msg);
+                        }
+                    },
+                    else => {},
+                }
+            }
+
+            // If we have shell commands, display them all and confirm once
+            if (shell_calls.items.len > 0) {
+                // Display all commands, handling multi-line scripts
+                try self.stderr.print("\n", .{});
+                for (shell_calls.items) |sc| {
+                    var lines = std.mem.splitScalar(u8, sc.command, '\n');
+                    while (lines.next()) |line| {
+                        const trimmed = std.mem.trim(u8, line, " \t\r");
+                        if (trimmed.len == 0) continue;
+                        try self.stderr.print("  $ {s}\n", .{trimmed});
+                    }
+                }
+
+                if (self.options.dry_run) {
+                    // Dry-run: report all as not executed
+                    for (shell_calls.items) |sc| {
+                        const tool_msg = try provider.Message.toolResult(
+                            self.allocator,
+                            sc.id,
+                            "[dry-run] Command not executed.",
+                        );
+                        try self.messages.append(self.allocator, tool_msg);
+                    }
+                } else {
+                    // Check if confirmation is needed
+                    const needs_confirm = switch (self.options.confirm_mode) {
+                        .all => true,
+                        .destructive => blk: {
+                            for (shell_calls.items) |sc| {
+                                if (isDestructive(sc.command)) break :blk true;
+                            }
+                            break :blk false;
+                        },
+                        .none => false,
+                    };
+
+                    if (needs_confirm) {
+                        const confirmed = try confirm.ask("Execute?", false);
+                        if (!confirmed) {
+                            // User declined — stop immediately
+                            for (shell_calls.items) |sc| {
+                                self.allocator.free(sc.command);
+                            }
+                            response.deinit(self.allocator);
+                            return;
+                        }
+                    }
+
+                    // Execute all commands sequentially
+                    for (shell_calls.items) |sc| {
+                        var result = try shell.execute(self.allocator, sc.command);
+                        defer result.deinit();
+
+                        const formatted = try result.format(self.allocator);
+                        defer self.allocator.free(formatted);
 
                         const tool_msg = try provider.Message.toolResult(
                             self.allocator,
-                            tc.id,
-                            result,
+                            sc.id,
+                            formatted,
                         );
                         try self.messages.append(self.allocator, tool_msg);
-                    },
-                    else => {},
+                    }
+                }
+
+                // Free extracted command strings
+                for (shell_calls.items) |sc| {
+                    self.allocator.free(sc.command);
                 }
             }
 
@@ -185,57 +318,50 @@ pub const Agent = struct {
         };
     }
 
-    fn executeTool(self: *Agent, tc: *const provider.ToolCall) ![]const u8 {
-        if (std.mem.eql(u8, tc.name, "run_shell")) {
-            return self.executeShellTool(tc.arguments);
-        } else if (std.mem.eql(u8, tc.name, "confirm")) {
-            return self.executeConfirmTool(tc.arguments);
-        } else {
-            return self.allocator.dupe(u8, "Unknown tool");
-        }
-    }
+    fn executeAskUserTool(self: *Agent, arguments_json: []const u8) ![]const u8 {
+        const question = try extractJsonString(self.allocator, arguments_json, "question");
+        defer self.allocator.free(question);
 
-    fn executeShellTool(self: *Agent, arguments_json: []const u8) ![]const u8 {
-        const command = try extractJsonString(self.allocator, arguments_json, "command");
-        defer self.allocator.free(command);
+        const options_json = try extractJsonString(self.allocator, arguments_json, "options");
+        defer self.allocator.free(options_json);
 
-        try self.stderr.print("  \x1b[90m$ {s}\x1b[0m\n", .{command});
-
-        if (self.options.dry_run) {
-            return self.allocator.dupe(u8, "[dry-run] Command not executed.");
-        }
-
-        // Check if the command needs confirmation based on confirm_mode
-        const needs_confirm = switch (self.options.confirm_mode) {
-            .all => true,
-            .destructive => isDestructive(command),
-            .none => false,
+        // Parse the recommended index (optional)
+        const recommended: ?usize = blk: {
+            const rec_str = extractJsonString(self.allocator, arguments_json, "recommended") catch break :blk null;
+            defer self.allocator.free(rec_str);
+            break :blk std.fmt.parseInt(usize, rec_str, 10) catch null;
         };
-        if (needs_confirm) {
-            const confirmed = try confirm.confirmCommand(command, false);
-            if (!confirmed) {
-                return self.allocator.dupe(u8, "User declined to execute this command.");
+
+        // Parse the options JSON array
+        const parsed = std.json.parseFromSlice(std.json.Value, self.allocator, options_json, .{}) catch {
+            return self.allocator.dupe(u8, "Error: could not parse options array.");
+        };
+        defer parsed.deinit();
+
+        const arr = switch (parsed.value) {
+            .array => |a| a,
+            else => return self.allocator.dupe(u8, "Error: options must be a JSON array."),
+        };
+
+        // Build a slice of option strings
+        var options_list: std.ArrayList([]const u8) = .empty;
+        defer options_list.deinit(self.allocator);
+        for (arr.items) |item| {
+            switch (item) {
+                .string => |s| try options_list.append(self.allocator, s),
+                else => {},
             }
         }
 
-        var result = try shell.execute(self.allocator, command);
-        defer result.deinit();
-
-        return result.format(self.allocator);
-    }
-
-    fn executeConfirmTool(self: *Agent, arguments_json: []const u8) ![]const u8 {
-        const message = try extractJsonString(self.allocator, arguments_json, "message");
-        defer self.allocator.free(message);
-
         if (self.options.dry_run) {
-            try self.stderr.print("  [dry-run] Would ask: {s}\n", .{message});
-            return self.allocator.dupe(u8, "true");
+            try self.stderr.print("  [dry-run] Would ask: {s}\n", .{question});
+            if (options_list.items.len > 0) {
+                return self.allocator.dupe(u8, options_list.items[0]);
+            }
+            return self.allocator.dupe(u8, "");
         }
 
-        const auto_yes = self.options.confirm_mode == .none;
-        const confirmed = try confirm.ask(message, auto_yes);
-        return self.allocator.dupe(u8, if (confirmed) "true" else "false");
+        return confirm.askUser(self.allocator, question, options_list.items, recommended);
     }
 
     fn cloneMessage(self: *Agent, msg: *const provider.Message) !provider.Message {
