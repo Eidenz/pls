@@ -293,10 +293,25 @@ pub const Agent = struct {
                         }
                     }
 
-                    // Execute all commands sequentially
+                    // Execute all commands sequentially and print output
+                    try self.stderr.print("\n", .{});
                     for (shell_calls.items) |sc| {
                         var result = try shell.execute(self.allocator, sc.command);
                         defer result.deinit();
+
+                        // Print command output
+                        if (result.stdout.len > 0) {
+                            try self.stderr.print("{s}", .{result.stdout});
+                            if (result.stdout[result.stdout.len - 1] != '\n') {
+                                try self.stderr.print("\n", .{});
+                            }
+                        }
+                        if (result.stderr.len > 0) {
+                            try self.stderr.print("\x1b[90m{s}\x1b[0m", .{result.stderr});
+                            if (result.stderr[result.stderr.len - 1] != '\n') {
+                                try self.stderr.print("\n", .{});
+                            }
+                        }
 
                         const formatted = try result.format(self.allocator);
                         defer self.allocator.free(formatted);
