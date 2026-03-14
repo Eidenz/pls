@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const config_mod = @import("config.zig");
 const provider = @import("llm/provider.zig");
@@ -9,7 +10,7 @@ const ollama = @import("llm/ollama.zig");
 const shell = @import("tools/shell.zig");
 const confirm = @import("tools/confirm.zig");
 
-const SYSTEM_PROMPT =
+const SYSTEM_PROMPT_BASE =
     \\You are `pls`, a command-line assistant that helps users accomplish tasks by executing shell commands.
     \\
     \\You have access to the following tools:
@@ -42,9 +43,59 @@ const SYSTEM_PROMPT =
     \\- If a command fails, try to diagnose the issue and suggest alternatives.
     \\- If the user declines to execute, stop immediately. Do not suggest alternatives,
     \\  ask follow-up questions, or take any further action.
-    \\- The user's operating system is detected automatically. Use appropriate commands.
+    \\- Use commands appropriate for the user's OS and shell shown in the environment below.
     \\- Respond in the same language the user uses.
 ;
+
+/// Build the full system prompt by appending runtime environment context.
+fn buildSystemPrompt(allocator: Allocator) ![]const u8 {
+    var buf: std.ArrayList(u8) = .empty;
+    errdefer buf.deinit(allocator);
+    const w = buf.writer(allocator);
+
+    // Static base prompt
+    try w.writeAll(SYSTEM_PROMPT_BASE);
+
+    // Environment context
+    try w.writeAll("\n\nEnvironment:\n");
+
+    // OS and architecture from uname
+    const uts = std.posix.uname();
+    const sysname = std.mem.sliceTo(&uts.sysname, 0);
+    const release = std.mem.sliceTo(&uts.release, 0);
+    const machine = std.mem.sliceTo(&uts.machine, 0);
+    const nodename = std.mem.sliceTo(&uts.nodename, 0);
+
+    try w.print("- OS: {s} {s} ({s})\n", .{ sysname, release, machine });
+    try w.print("- Hostname: {s}\n", .{nodename});
+
+    // User
+    if (std.posix.getenv("USER")) |user| {
+        try w.print("- User: {s}\n", .{user});
+    }
+
+    // Shell
+    if (std.posix.getenv("SHELL")) |user_shell| {
+        try w.print("- Shell: {s}\n", .{user_shell});
+    }
+
+    // Current working directory
+    var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
+    if (std.posix.getcwd(&cwd_buf)) |cwd| {
+        try w.print("- Working directory: {s}\n", .{cwd});
+    } else |_| {
+        if (std.posix.getenv("PWD")) |pwd| {
+            try w.print("- Working directory: {s}\n", .{pwd});
+        }
+    }
+
+    // Home directory
+    if (std.posix.getenv("HOME")) |home| {
+        try w.print("- Home: {s}\n", .{home});
+    }
+
+    return buf.toOwnedSlice(allocator);
+}
 
 const TOOLS = [_]provider.Tool{
     .{
@@ -85,17 +136,21 @@ pub const Agent = struct {
     messages: std.ArrayList(provider.Message) = .empty,
     options: AgentOptions,
     stderr: std.fs.File.DeprecatedWriter,
+    system_prompt: []const u8,
 
-    pub fn init(allocator: Allocator, cfg: *const config_mod.Config, options: AgentOptions) Agent {
+    pub fn init(allocator: Allocator, cfg: *const config_mod.Config, options: AgentOptions) !Agent {
+        const prompt = try buildSystemPrompt(allocator);
         return .{
             .allocator = allocator,
             .cfg = cfg,
             .options = options,
             .stderr = std.fs.File.stderr().deprecatedWriter(),
+            .system_prompt = prompt,
         };
     }
 
     pub fn deinit(self: *Agent) void {
+        self.allocator.free(self.system_prompt);
         for (self.messages.items) |*msg| {
             msg.deinit(self.allocator);
         }
@@ -279,7 +334,7 @@ pub const Agent = struct {
                     self.allocator,
                     api_key,
                     self.cfg.anthropic_model,
-                    SYSTEM_PROMPT,
+                    self.system_prompt,
                     self.messages.items,
                     &TOOLS,
                 );
@@ -290,7 +345,7 @@ pub const Agent = struct {
                     self.allocator,
                     api_key,
                     self.cfg.openai_model,
-                    SYSTEM_PROMPT,
+                    self.system_prompt,
                     self.messages.items,
                     &TOOLS,
                     null,
@@ -302,7 +357,7 @@ pub const Agent = struct {
                     self.allocator,
                     api_key,
                     self.cfg.gemini_model,
-                    SYSTEM_PROMPT,
+                    self.system_prompt,
                     self.messages.items,
                     &TOOLS,
                 );
@@ -310,7 +365,7 @@ pub const Agent = struct {
             .ollama => ollama.chat(
                 self.allocator,
                 self.cfg.ollama_model,
-                SYSTEM_PROMPT,
+                self.system_prompt,
                 self.messages.items,
                 &TOOLS,
                 self.cfg.ollama_host,

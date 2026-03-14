@@ -191,7 +191,7 @@ fn runTask(
     }
 
     // Run the agent
-    var agent = agent_mod.Agent.init(allocator, &cfg, .{
+    var agent = try agent_mod.Agent.init(allocator, &cfg, .{
         .confirm_mode = confirm_mode,
         .dry_run = dry_run,
         .max_turns = max_turns,
