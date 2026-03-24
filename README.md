@@ -21,31 +21,17 @@ Both work. `pls` understands any language.
 
 ## Install
 
-### Homebrew (macOS / Linux)
+### Quick install (macOS / Linux)
+
+```bash
+curl -sSfL https://raw.githubusercontent.com/colus001/pls/main/install.sh | sh
+```
+
+### Homebrew
 
 ```bash
 brew tap colus001/tap
 brew install pls
-```
-
-### Debian / Ubuntu
-
-Download the `.deb` package from the [latest release](https://github.com/colus001/pls/releases/latest):
-
-```bash
-# x86_64
-sudo dpkg -i pls_*_amd64.deb
-
-# ARM64
-sudo dpkg -i pls_*_arm64.deb
-```
-
-### Pre-built binaries
-
-Download from [GitHub Releases](https://github.com/colus001/pls/releases/latest) and place in your `$PATH`:
-
-```bash
-sudo install pls-linux-x86_64 /usr/local/bin/pls
 ```
 
 ### Build from source
@@ -57,6 +43,8 @@ git clone https://github.com/colus001/pls.git && cd pls
 zig build -Doptimize=ReleaseFast
 cp zig-out/bin/pls ~/.local/bin/
 ```
+
+Pre-built binaries and `.deb` packages are also available on the [releases page](https://github.com/colus001/pls/releases/latest).
 
 ## Setup
 
@@ -152,6 +140,7 @@ Piping:
 
 ```toml
 provider = "anthropic"
+confirm_mode = "all"          # all | destructive | none
 
 anthropic_api_key = "sk-ant-..."
 anthropic_model = "claude-sonnet-4-5-20250514"
