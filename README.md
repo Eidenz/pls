@@ -152,6 +152,7 @@ Piping:
 
 ```toml
 provider = "anthropic"
+confirm_mode = "all"          # all | destructive | none
 
 anthropic_api_key = "sk-ant-..."
 anthropic_model = "claude-sonnet-4-5-20250514"
