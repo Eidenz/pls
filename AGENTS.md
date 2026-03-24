@@ -183,6 +183,57 @@ return buf.toOwnedSlice(allocator);
 
 ---
 
+## Release Process
+
+Releases are fully automated via GitHub Actions (`.github/workflows/ci.yml`).
+
+### Cutting a Release
+
+```sh
+git checkout main
+git merge develop
+git tag v1.2.3
+git push origin main --tags
+```
+
+That's it. CI takes over from there.
+
+### What CI Does Automatically
+
+| Job | Trigger | Output |
+|-----|---------|--------|
+| `test` | push to `main` / `develop`, PRs | Build + unit tests |
+| `release` | `v*` tag push | 4 platform binaries + 2 `.deb` packages |
+| `publish` | after `release` | GitHub Release with all files attached |
+| `update-homebrew` | after `publish` | `Formula/pls.rb` pushed to `colus001/homebrew-tap` |
+
+### Release Artifacts
+
+Each release produces:
+
+```
+pls-linux-x86_64        # Linux x86_64 (static musl)
+pls-linux-aarch64       # Linux ARM64 (static musl)
+pls-macos-x86_64        # macOS Intel
+pls-macos-aarch64       # macOS Apple Silicon
+pls_<version>_amd64.deb # Debian/Ubuntu x86_64
+pls_<version>_arm64.deb # Debian/Ubuntu ARM64
+```
+
+### Required Secret
+
+`HOMEBREW_TAP_TOKEN` must be set in `colus001/pls` repo secrets (Settings → Secrets → Actions).
+It is a GitHub Fine-grained PAT with **Contents: Read and Write** access to `colus001/homebrew-tap`.
+Without it, the `update-homebrew` job will fail but the GitHub Release will still be created.
+
+### Version Bump Checklist
+
+1. Update `VERSION` in `src/main.zig`
+2. Update `version` in `build.zig.zon`
+3. Commit, merge to `main`, tag, push
+
+---
+
 ## Adding a New Tool
 
 1. Create `src/tools/your_tool.zig` with execution logic.
