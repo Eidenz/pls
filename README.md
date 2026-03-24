@@ -24,7 +24,7 @@ Both work. `pls` understands any language.
 Requires [Zig 0.15+](https://ziglang.org/download/).
 
 ```bash
-git clone <repo-url> && cd pls
+git clone https://github.com/colus001/pls.git && cd pls
 zig build -Doptimize=ReleaseFast
 ```
 
