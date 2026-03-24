@@ -160,18 +160,20 @@ src/
   main.zig              Entry point, arg parsing, subcommand routing
   agent.zig             Tool-calling loop (LLM -> tool -> observe -> repeat)
   config.zig            Config file parsing (~/.config/pls/config.toml)
+  config_editor.zig     Interactive config editor (terminal UI)
   init.zig              Interactive setup wizard
+  tty.zig               TTY helpers (readLine, readLineMasked with echo off)
   llm/
     provider.zig        Shared types (Message, Tool, ToolCall, etc.)
     anthropic.zig       Anthropic Claude API
-    openai.zig          OpenAI GPT API (also used by Ollama)
+    openai.zig          OpenAI GPT API
     gemini.zig          Google Gemini API
-    ollama.zig          Ollama wrapper (OpenAI-compatible, no auth)
+    ollama.zig          Ollama local API (delegates to openai.zig format)
     http_client.zig     HTTP POST helper using std.http.Client
     json_helpers.zig    JSON serialization for API request bodies
   tools/
     shell.zig           Shell command execution via /bin/sh
-    confirm.zig         TTY confirmation prompts
+    confirm.zig         ask() y/N prompt and askUser() numbered options
 ```
 
 ## License
