@@ -18,6 +18,7 @@ zig build test -- --filter "isDestructive detects kill"
 zig test src/agent.zig
 zig test src/config.zig
 zig test src/tools/shell.zig
+zig test src/llm/provider.zig
 zig test src/llm/json_helpers.zig
 
 # Run the binary
