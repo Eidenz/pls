@@ -21,19 +21,41 @@ Both work. `pls` understands any language.
 
 ## Install
 
+### Homebrew (macOS / Linux)
+
+```bash
+brew tap colus001/tap
+brew install pls
+```
+
+### Debian / Ubuntu
+
+Download the `.deb` package from the [latest release](https://github.com/colus001/pls/releases/latest):
+
+```bash
+# x86_64
+sudo dpkg -i pls_*_amd64.deb
+
+# ARM64
+sudo dpkg -i pls_*_arm64.deb
+```
+
+### Pre-built binaries
+
+Download from [GitHub Releases](https://github.com/colus001/pls/releases/latest) and place in your `$PATH`:
+
+```bash
+sudo install pls-linux-x86_64 /usr/local/bin/pls
+```
+
+### Build from source
+
 Requires [Zig 0.15+](https://ziglang.org/download/).
 
 ```bash
 git clone https://github.com/colus001/pls.git && cd pls
 zig build -Doptimize=ReleaseFast
-```
-
-The binary is at `zig-out/bin/pls`. Add it to your `$PATH`:
-
-```bash
 cp zig-out/bin/pls ~/.local/bin/
-# or
-sudo cp zig-out/bin/pls /usr/local/bin/
 ```
 
 ## Setup
