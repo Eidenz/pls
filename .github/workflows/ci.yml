@@ -187,13 +187,13 @@ jobs:
 
           sed -i 's/^          //' tap/Formula/pls.rb
 
-          cd tap
-          git init
-          git remote add origin "https://x-access-token:${TAP_TOKEN}@github.com/colus001/homebrew-tap.git"
-          git fetch origin main || git fetch origin
-          git checkout main 2>/dev/null || git checkout -b main
-          git add Formula/pls.rb
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/colus001/homebrew-tap.git" repo
+          mkdir -p repo/Formula
+          cp tap/Formula/pls.rb repo/Formula/pls.rb
+          cd repo
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/pls.rb
+          git diff --cached --quiet && echo "Formula unchanged" && exit 0
           git commit -m "Update pls to ${VERSION}"
           git push origin main
