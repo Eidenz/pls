@@ -4,7 +4,7 @@ const agent_mod = @import("agent.zig");
 const init_mod = @import("init.zig");
 const config_editor = @import("config_editor.zig");
 
-const VERSION = "0.1.0";
+const VERSION = "0.1.1";
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
