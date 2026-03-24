@@ -93,18 +93,33 @@ pls -y 'kill process on port 3000'
 
 # Dry run (show commands without executing)
 pls --dry-run 'clean up docker containers'
+
+# Override provider or model for one invocation
+pls --provider openai --model gpt-4o 'explain this error'
+
+# Pipe a task from stdin
+echo 'find large files over 1GB' | pls
 ```
 
 ## CLI reference
 
 ```
-pls <task>           Run a natural language task
-pls init             Interactive setup wizard
+pls <task>                   Run a natural language task
+pls init                     Interactive setup wizard
+pls config                   Interactive config editor
+pls config show              Show active configuration
 
---yes, -y            Skip all confirmation prompts
---dry-run            Show commands without executing them
---version, -v        Show version
---help, -h           Show this help
+--confirm <mode>             Confirmation mode: all | destructive | none
+--yes, -y                    Shorthand for --confirm=none
+--provider <name>            Override LLM provider: anthropic | openai | gemini | ollama
+--model <name>               Override model name for this invocation
+--max-turns <n>              Maximum agent turns (default: 20)
+--dry-run                    Show commands without executing them
+--version, -v                Show version
+--help, -h                   Show this help
+
+Piping:
+  echo 'your task' | pls
 ```
 
 ## Config file
