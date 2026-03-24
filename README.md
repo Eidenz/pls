@@ -70,7 +70,9 @@ Config is saved to `~/.config/pls/config.toml`.
 These override the config file:
 
 ```bash
-export DO_PROVIDER=gemini         # anthropic | openai | gemini | ollama
+export PLS_PROVIDER=gemini        # anthropic | openai | gemini | ollama
+export DO_PROVIDER=gemini         # same as PLS_PROVIDER (legacy alias)
+export PLS_CONFIRM=destructive    # all | destructive | none
 export ANTHROPIC_API_KEY=sk-ant-...
 export OPENAI_API_KEY=sk-...
 export GEMINI_API_KEY=AIza...
