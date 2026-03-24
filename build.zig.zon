@@ -1,5 +1,5 @@
 .{
-    .name = .doit,
+    .name = .pls,
     .version = "0.1.0",
     .fingerprint = 0x35dc569e4d7bf418,
     .minimum_zig_version = "0.15.2",
