@@ -167,6 +167,7 @@ fn editConfirmMode(cfg: *config_mod.Config, stdin: anytype, out: anytype) !bool 
 fn editActiveModel(cfg: *config_mod.Config, stdin: anytype, out: anytype) !bool {
     return switch (cfg.provider) {
         .proxy => editModelMenu(cfg, .proxy_model, "proxy", &[_][]const u8{
+            "gemini-3-flash-preview",
             "gemini-2.5-flash-lite",
         }, cfg.proxy_model, stdin, out),
         .anthropic => editModelMenu(cfg, .anthropic_model, "anthropic", &[_][]const u8{
