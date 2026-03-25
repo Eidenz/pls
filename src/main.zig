@@ -203,11 +203,15 @@ fn runTask(
     defer agent.deinit();
 
     agent.run(task) catch |err| {
-        try stderr.print("\nError: {}\n", .{err});
+        // RateLimited: proxy.zig already printed a descriptive message; skip generic prefix
+        if (err != error.RateLimited) {
+            try stderr.print("\nError: {}\n", .{err});
+        }
         switch (err) {
             error.NoApiKey => try stderr.writeAll("Run `pls init` to configure your API key.\n"),
             error.HttpError => try stderr.writeAll("Failed to connect to the LLM API. Check your network.\n"),
             error.ApiError => try stderr.writeAll("The LLM API returned an error. Check your API key and model.\n"),
+            error.RateLimited => {}, // message already printed by proxy.zig
             else => {},
         }
     };
