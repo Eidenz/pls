@@ -48,6 +48,9 @@ pub fn main() !void {
         } else if (std.mem.eql(u8, arg, "config") and i + 1 < args.len and std.mem.eql(u8, args[i + 1], "show")) {
             try showConfig(allocator, stdout, stderr);
             return;
+        } else if (std.mem.eql(u8, arg, "config") and i + 1 < args.len and std.mem.eql(u8, args[i + 1], "reset")) {
+            try resetConfig(allocator, stderr);
+            return;
         } else if (std.mem.eql(u8, arg, "config")) {
             try config_editor.runEditor(allocator);
             return;
@@ -253,6 +256,14 @@ fn showConfig(allocator: std.mem.Allocator, stdout: anytype, stderr: anytype) !v
     try stdout.print("  config_file   = {s}\n\n", .{config_path});
 }
 
+fn resetConfig(allocator: std.mem.Allocator, stderr: anytype) !void {
+    config_mod.reset(allocator) catch |err| {
+        try stderr.print("Error resetting config: {}\n", .{err});
+        return;
+    };
+    try stderr.writeAll("Config reset to defaults. Run `pls init` to reconfigure.\n");
+}
+
 /// Read from stdin if it's piped (not a terminal).
 fn readStdinIfPiped(allocator: std.mem.Allocator) !?[]const u8 {
     const stdin_file = std.fs.File.stdin();
@@ -291,6 +302,7 @@ fn printUsage(out: anytype) !void {
         \\    pls init                Interactive setup wizard
         \\    pls config              Interactive config editor
         \\    pls config show         Show active configuration
+        \\    pls config reset        Reset configuration to defaults
         \\
         \\  Options:
         \\    --confirm <mode>        Set confirmation mode: all, destructive, none
