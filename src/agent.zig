@@ -214,6 +214,8 @@ pub const Agent = struct {
                 return err;
             };
             spinner.stop();
+            // Free response on any error path; normal paths call deinit() explicitly below.
+            errdefer response.deinit(self.allocator);
 
             // Warn when any rate limit tier is at or below 20% remaining
             if (response.rate_limit) |rl| {
