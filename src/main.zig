@@ -325,9 +325,9 @@ fn resetUsage(allocator: std.mem.Allocator, stdout: anytype, stderr: anytype) !v
         return;
     }
 
-    // Require admin key from environment
-    const admin_key = std.posix.getenv("ADMIN_KEY") orelse {
-        try stderr.writeAll("ADMIN_KEY environment variable is not set.\n");
+    // Require admin key from config or ADMIN_KEY env var
+    const admin_key = cfg.admin_key orelse {
+        try stderr.writeAll("Admin key is not configured. Set admin_key in config or ADMIN_KEY env var.\n");
         return;
     };
 
@@ -472,6 +472,15 @@ fn showConfig(allocator: std.mem.Allocator, stdout: anytype, stderr: anytype) !v
             try stdout.print("  ollama_host   = {s}\n", .{cfg.ollama_host});
         } else {
             try stdout.writeAll("  api_key       = (not set)\n");
+        }
+    }
+
+    // Show admin_key masked (only when set)
+    if (cfg.admin_key) |k| {
+        if (k.len > 8) {
+            try stdout.print("  admin_key     = {s}...{s}\n", .{ k[0..4], k[k.len - 4 ..] });
+        } else if (k.len > 0) {
+            try stdout.writeAll("  admin_key     = ****\n");
         }
     }
 
