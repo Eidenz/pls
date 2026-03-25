@@ -47,6 +47,9 @@ pub fn main() !void {
         if (std.mem.eql(u8, arg, "init")) {
             try init_mod.runSetup(allocator);
             return;
+        } else if (std.mem.eql(u8, arg, "usage") and i + 1 < args.len and std.mem.eql(u8, args[i + 1], "reset")) {
+            try resetUsage(allocator, stdout, stderr);
+            return;
         } else if (std.mem.eql(u8, arg, "usage")) {
             try checkUsage(allocator, stdout, stderr);
             return;
@@ -217,6 +220,8 @@ fn runTask(
             error.HttpError => try stderr.writeAll("Failed to connect to the LLM API. Check your network.\n"),
             error.ApiError => try stderr.writeAll("The LLM API returned an error. Check your API key and model.\n"),
             error.RateLimited => {}, // message already printed by proxy.zig
+            error.InvalidResponse => try stderr.writeAll("The API returned an unexpected response format. See above for details.\n"),
+            error.JsonParseError => try stderr.writeAll("Failed to parse the API response. See above for details.\n"),
             else => {},
         }
     };
@@ -306,6 +311,83 @@ fn checkUsage(allocator: std.mem.Allocator, stdout: anytype, stderr: anytype) !v
     try printUsageTier(stdout, allocator, "daily ", daily.?);
 
     try stdout.writeAll("\n");
+}
+
+fn resetUsage(allocator: std.mem.Allocator, stdout: anytype, stderr: anytype) !void {
+    var cfg = config_mod.load(allocator) catch |err| {
+        try stderr.print("Error loading config: {}\n", .{err});
+        return;
+    };
+    defer cfg.deinit();
+
+    if (cfg.provider != .proxy) {
+        try stderr.print("Rate limit reset is only available for the free proxy (current provider: {s}).\n", .{cfg.provider.toString()});
+        return;
+    }
+
+    // Require admin key from environment
+    const admin_key = std.posix.getenv("ADMIN_KEY") orelse {
+        try stderr.writeAll("ADMIN_KEY environment variable is not set.\n");
+        return;
+    };
+
+    // Fetch current IP from /v1/rate-limit
+    const info_url = try std.fmt.allocPrint(allocator, "{s}/v1/rate-limit", .{cfg.proxy_url});
+    defer allocator.free(info_url);
+
+    const info_body = http_client.get(allocator, info_url, &.{}) catch |err| {
+        switch (err) {
+            error.HttpError => try stderr.print("Failed to connect to proxy: {s}\n", .{cfg.proxy_url}),
+            else => try stderr.writeAll("Failed to fetch current rate limit info.\n"),
+        }
+        return;
+    };
+    defer allocator.free(info_body);
+
+    const info_parsed = std.json.parseFromSlice(std.json.Value, allocator, info_body, .{}) catch {
+        try stderr.writeAll("Failed to parse rate limit response.\n");
+        return;
+    };
+    defer info_parsed.deinit();
+
+    const ip = blk: {
+        const root = switch (info_parsed.value) {
+            .object => |o| o,
+            else => break :blk "unknown",
+        };
+        break :blk if (root.get("ip")) |v| switch (v) {
+            .string => |s| s,
+            else => "unknown",
+        } else "unknown";
+    };
+
+    if (std.mem.eql(u8, ip, "unknown")) {
+        try stderr.writeAll("Could not determine current IP from proxy.\n");
+        return;
+    }
+
+    // Build Authorization header
+    const auth_value = try std.fmt.allocPrint(allocator, "Bearer {s}", .{admin_key});
+    defer allocator.free(auth_value);
+
+    const headers = [_]std.http.Header{
+        .{ .name = "authorization", .value = auth_value },
+    };
+
+    // DELETE /v1/rate-limit/:ip
+    const delete_url = try std.fmt.allocPrint(allocator, "{s}/v1/rate-limit/{s}", .{ cfg.proxy_url, ip });
+    defer allocator.free(delete_url);
+
+    _ = http_client.delete(allocator, delete_url, &headers) catch |err| {
+        switch (err) {
+            error.HttpError => try stderr.print("Failed to connect to proxy: {s}\n", .{cfg.proxy_url}),
+            error.ApiError => try stderr.writeAll("Reset failed. Check your PLS_ADMIN_KEY.\n"),
+            else => try stderr.print("Error: {}\n", .{err}),
+        }
+        return;
+    };
+
+    try stdout.print("Rate limit reset for {s}.\n", .{ip});
 }
 
 fn getJsonInt(obj: std.json.ObjectMap, key: []const u8) ?i64 {
