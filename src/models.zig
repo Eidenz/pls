@@ -6,7 +6,7 @@
 // ──────────────────────────────────────────────────────────────────
 
 pub const DEFAULT_PROXY_MODEL = "gemini-3-flash-preview";
-pub const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6-20250603";
+pub const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6";
 pub const DEFAULT_OPENAI_MODEL = "gpt-5.4-mini";
 pub const DEFAULT_GEMINI_MODEL = "gemini-3-flash-preview";
 pub const DEFAULT_OLLAMA_MODEL = "qwen3:4b";
@@ -21,9 +21,9 @@ pub const PROXY_MODELS = [_][]const u8{
 };
 
 pub const ANTHROPIC_MODELS = [_][]const u8{
-    "claude-sonnet-4-6-20250603",
-    "claude-opus-4-6-20250603",
-    "claude-haiku-3-5-20241022",
+    "claude-sonnet-4-6",
+    "claude-opus-4-6",
+    "claude-haiku-4-6",
 };
 
 pub const OPENAI_MODELS = [_][]const u8{
