@@ -71,7 +71,7 @@ fn displayMenu(cfg: *const config_mod.Config, out: anytype) !void {
 
     try out.print("   \x1b[1m1\x1b[0m) provider        = {s}\n", .{cfg.provider.toString()});
     try out.print("   \x1b[1m2\x1b[0m) confirm_mode    = {s}\n", .{cfg.confirm_mode.toString()});
-    try out.print("   \x1b[1m3\x1b[0m) model           = {s}\n", .{cfg.getModel()});
+    try out.print("   \x1b[1m3\x1b[0m) {s}_model  = {s}\n", .{ cfg.provider.toString(), cfg.getModel() });
     try out.print("   \x1b[1m4\x1b[0m) anthropic_key   = {s}\n", .{maskKey(cfg.anthropic_api_key)});
     try out.print("   \x1b[1m5\x1b[0m) openai_key      = {s}\n", .{maskKey(cfg.openai_api_key)});
     try out.print("   \x1b[1m6\x1b[0m) gemini_key      = {s}\n", .{maskKey(cfg.gemini_api_key)});
