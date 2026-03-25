@@ -106,6 +106,27 @@ export OLLAMA_MODEL=llama3.2
 
 ## Usage
 
+### Quoting your task
+
+Quotes are **optional** for plain natural language. `pls` collects all non-flag arguments and joins them with spaces, so these two are identical:
+
+```bash
+pls 'show disk usage by directory'
+pls show disk usage by directory
+```
+
+You only need quotes when your task contains **shell special characters** that the shell would interpret before `pls` sees them:
+
+| Character | Example | Why quotes are needed |
+|-----------|---------|----------------------|
+| `!` | `pls 'fix this bug!'` | History expansion in bash |
+| `$` | `pls 'what is $HOME'` | Variable substitution |
+| `>` `<` `\|` | `pls 'write output > file'` | Redirection / pipes |
+| `(` `)` | `pls 'calculate (a+b)'` | Subshell execution |
+| `;` `&&` | `pls 'do this; then that'` | Command separators |
+
+When in doubt, wrapping in single quotes (`'...'`) is always safe.
+
 ```bash
 # Basic usage
 pls 'stop all processes using port 1380'
