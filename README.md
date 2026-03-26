@@ -203,7 +203,7 @@ ollama_model = "llama3.1"
 
 ## Self-hosting the proxy
 
-The default free tier uses a hosted proxy at `pls-proxy.seokjun.kim`. You can self-host your own proxy to remove rate limits or use a different model.
+You can self-host your own proxy to remove rate limits or use a different model.
 
 ### Proxy protocol
 
@@ -226,9 +226,7 @@ The proxy's only responsibilities:
 
 ### Deploy your own
 
-A reference implementation using Cloudflare Workers is available at [colus001/pls-proxy](https://github.com/colus001/pls-proxy).
-
-Then configure `pls` to use your proxy:
+A reference implementation using Cloudflare Workers is available. Once deployed, configure `pls` to use your proxy:
 
 ```bash
 export PLS_PROXY_URL=https://your-proxy.example.com
