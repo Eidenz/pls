@@ -3,6 +3,7 @@ const config_mod = @import("config.zig");
 const agent_mod = @import("agent.zig");
 const init_mod = @import("init.zig");
 const config_editor = @import("config_editor.zig");
+const history_mod = @import("history.zig");
 const build_info = @import("build_info");
 const http_client = @import("llm/http_client.zig");
 
@@ -46,6 +47,9 @@ pub fn main() !void {
 
         if (std.mem.eql(u8, arg, "init")) {
             try init_mod.runSetup(allocator);
+            return;
+        } else if (std.mem.eql(u8, arg, "history")) {
+            try runHistory(allocator, stdout, stderr);
             return;
         } else if (std.mem.eql(u8, arg, "usage") and i + 1 < args.len and std.mem.eql(u8, args[i + 1], "reset")) {
             try resetUsage(allocator, stdout, stderr);
@@ -202,6 +206,13 @@ fn runTask(
         return;
     }
 
+    // Capture timestamp and cwd before running the agent
+    const session_timestamp = history_mod.currentTimestamp(allocator) catch null;
+    defer if (session_timestamp) |ts| allocator.free(ts);
+
+    var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const session_cwd = std.posix.getcwd(&cwd_buf) catch std.posix.getenv("PWD") orelse "";
+
     // Run the agent
     var agent = try agent_mod.Agent.init(allocator, &cfg, .{
         .confirm_mode = confirm_mode,
@@ -225,6 +236,14 @@ fn runTask(
             else => {},
         }
     };
+
+    // Record history entry (best-effort; failure is non-fatal)
+    history_mod.appendEntry(allocator, .{
+        .timestamp = session_timestamp orelse "unknown",
+        .cwd = session_cwd,
+        .task = task,
+        .commands = agent.executed_commands.items,
+    }) catch {};
 }
 
 fn checkUsage(allocator: std.mem.Allocator, stdout: anytype, stderr: anytype) !void {
@@ -441,6 +460,58 @@ fn formatSeconds(allocator: std.mem.Allocator, secs: u64) ![]const u8 {
     }
 }
 
+fn runHistory(allocator: std.mem.Allocator, stdout: anytype, stderr: anytype) !void {
+    const entries = history_mod.loadEntries(allocator, 20) catch |err| {
+        try stderr.print("Error loading history: {}\n", .{err});
+        return;
+    };
+    defer {
+        for (entries) |entry| history_mod.freeEntry(allocator, entry);
+        allocator.free(entries);
+    }
+
+    if (entries.len == 0) {
+        try stdout.writeAll("No history yet. Run a task with `pls <task>` to get started.\n");
+        return;
+    }
+
+    const home = std.posix.getenv("HOME") orelse "";
+
+    try stdout.writeByte('\n');
+    for (entries) |entry| {
+        // Display timestamp: "2026-03-30T14:23:00Z" -> "2026-03-30 14:23"
+        var ts_buf = [_]u8{' '} ** 16;
+        const ts_len = @min(entry.timestamp.len, 16);
+        @memcpy(ts_buf[0..ts_len], entry.timestamp[0..ts_len]);
+        if (ts_len > 10) ts_buf[10] = ' '; // replace 'T' with space
+        const ts_display: []const u8 = &ts_buf;
+
+        // Shorten cwd: replace HOME prefix with ~
+        const display_cwd = if (home.len > 0 and std.mem.startsWith(u8, entry.cwd, home))
+            try std.fmt.allocPrint(allocator, "~{s}", .{entry.cwd[home.len..]})
+        else
+            try allocator.dupe(u8, entry.cwd);
+        defer allocator.free(display_cwd);
+
+        try stdout.print("[{s}] {s}\n", .{ ts_display, display_cwd });
+        try stdout.print("  Task: {s}\n", .{entry.task});
+
+        if (entry.commands.len > 0) {
+            try stdout.writeAll("  Commands:\n");
+            for (entry.commands) |cmd| {
+                var lines = std.mem.splitScalar(u8, cmd, '\n');
+                while (lines.next()) |line| {
+                    const trimmed = std.mem.trim(u8, line, " \t\r");
+                    if (trimmed.len == 0) continue;
+                    try stdout.print("    $ {s}\n", .{trimmed});
+                }
+            }
+        }
+
+        try stdout.writeByte('\n');
+    }
+}
+
 fn showConfig(allocator: std.mem.Allocator, stdout: anytype, stderr: anytype) !void {
     var cfg = config_mod.load(allocator) catch |err| {
         try stderr.print("Error loading config: {}\n", .{err});
@@ -537,6 +608,7 @@ fn printUsage(out: anytype) !void {
         \\  Usage:
         \\    pls <task>              Run a natural language task
         \\    pls init                Interactive setup wizard
+        \\    pls history             Show recent task history
         \\    pls usage               Show proxy rate limit usage
         \\    pls config              Interactive config editor
         \\    pls config show         Show active configuration
