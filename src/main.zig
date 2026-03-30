@@ -9,6 +9,12 @@ const http_client = @import("llm/http_client.zig");
 
 const VERSION = build_info.version;
 
+const SPONSOR_URL = "https://github.com/sponsors/colus001";
+
+fn printSponsorMessage(stderr: anytype) void {
+    stderr.writeAll("\x1b[36m\xe2\x99\xa1 Support free proxy of pls: " ++ SPONSOR_URL ++ "\x1b[0m\n") catch {};
+}
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -230,7 +236,8 @@ fn runTask(
             error.NoApiKey => try stderr.writeAll("Run `pls init` to configure your API key.\n"),
             error.HttpError => try stderr.writeAll("Failed to connect to the LLM API. Check your network.\n"),
             error.ApiError => try stderr.writeAll("The LLM API returned an error. Check your API key and model.\n"),
-            error.RateLimited => {}, // message already printed by proxy.zig
+            error.RateLimited => printSponsorMessage(stderr),
+            error.BudgetExceeded => printSponsorMessage(stderr),
             error.InvalidResponse => try stderr.writeAll("The API returned an unexpected response format. See above for details.\n"),
             error.JsonParseError => try stderr.writeAll("Failed to parse the API response. See above for details.\n"),
             else => {},

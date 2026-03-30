@@ -152,6 +152,14 @@ pub fn chat(
         return error.ApiError;
     }
 
+    if (status == .service_unavailable) {
+        // Proxy budget exceeded: body is {"error": "string"} from the proxy itself
+        if (isProxyRateLimitBody(allocator, resp_body)) {
+            printProxyBudgetError(stderr, allocator, resp_body);
+            return error.BudgetExceeded;
+        }
+    }
+
     // Other HTTP errors
     printUpstreamError(stderr, allocator, resp_body, status);
     return error.ApiError;
@@ -257,11 +265,40 @@ fn printProxyRateLimitError(
     }
 }
 
+/// Print the proxy's budget-exceeded error.
+/// Body format: {"error": "..."} (same structure as rate-limit but no retry_after_seconds)
+fn printProxyBudgetError(
+    stderr: anytype,
+    allocator: Allocator,
+    body: []const u8,
+) void {
+    const parsed = std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch {
+        stderr.writeAll("Proxy budget limit exceeded. Service temporarily unavailable.\n") catch {};
+        return;
+    };
+    defer parsed.deinit();
+
+    const root = switch (parsed.value) {
+        .object => |o| o,
+        else => {
+            stderr.writeAll("Proxy budget limit exceeded. Service temporarily unavailable.\n") catch {};
+            return;
+        },
+    };
+
+    const error_msg = if (root.get("error")) |e| switch (e) {
+        .string => |s| s,
+        else => "Proxy budget limit exceeded. Service temporarily unavailable.",
+    } else "Proxy budget limit exceeded. Service temporarily unavailable.";
+
+    stderr.print("{s}\n", .{error_msg}) catch {};
+}
+
 /// Print an upstream Gemini API error to stderr.
 /// Handles Gemini format: {"error": {"message": "..."}}
 /// Falls back to raw body if parsing fails.
 /// When `status` is non-null, includes the HTTP status code in the prefix.
-fn printUpstreamError(
+pub fn printUpstreamError(
     stderr: anytype,
     allocator: Allocator,
     body: []const u8,
