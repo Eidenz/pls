@@ -10,6 +10,9 @@ pub const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6";
 pub const DEFAULT_OPENAI_MODEL = "gpt-5.4-mini";
 pub const DEFAULT_GEMINI_MODEL = "gemini-3-flash-preview";
 pub const DEFAULT_OLLAMA_MODEL = "qwen3:4b";
+/// No sensible default — the user must pick a model that their custom
+/// OpenAI-compatible endpoint serves.
+pub const DEFAULT_CUSTOM_MODEL = "";
 
 // ──────────────────────────────────────────────────────────────────
 // Model menus (shown in `pls init` and `pls config`)

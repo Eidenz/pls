@@ -33,16 +33,35 @@ pub fn chat(
         try headers_list.append(allocator, .{ .name = "authorization", .value = auth_duped.? });
     }
 
-    const url = if (base_url) |bu|
-        try std.fmt.allocPrint(allocator, "{s}/v1/chat/completions", .{bu})
-    else
-        try allocator.dupe(u8, DEFAULT_API_URL);
+    const url = try buildChatUrl(allocator, base_url);
     defer allocator.free(url);
 
     const response_body = try http_client.post(allocator, url, headers_list.items, body);
     defer allocator.free(response_body);
 
     return parseResponse(allocator, response_body);
+}
+
+/// Build the chat-completions URL for an OpenAI-compatible endpoint.
+/// - When `base_url` is null or empty, returns the default OpenAI URL.
+/// - When `base_url` already ends with `/chat/completions`, returns it as-is.
+/// - Otherwise appends `/chat/completions` to the base.
+///
+/// The caller is responsible for including any version segment in `base_url`
+/// (e.g. `https://api.openai.com/v1`, `https://api.z.ai/api/coding/paas/v4`).
+/// We do NOT hardcode `/v1/` because OpenAI-compatible providers use varied
+/// path schemes — ZAI uses `/v4`, some self-hosted gateways use no version,
+/// etc. A single trailing `/` is trimmed before joining.
+/// Caller owns the returned slice.
+fn buildChatUrl(allocator: Allocator, base_url: ?[]const u8) ![]const u8 {
+    const bu = base_url orelse return allocator.dupe(u8, DEFAULT_API_URL);
+    if (bu.len == 0) return allocator.dupe(u8, DEFAULT_API_URL);
+
+    const trimmed = if (bu[bu.len - 1] == '/') bu[0 .. bu.len - 1] else bu;
+    if (std.mem.endsWith(u8, trimmed, "/chat/completions")) {
+        return allocator.dupe(u8, trimmed);
+    }
+    return std.fmt.allocPrint(allocator, "{s}/chat/completions", .{trimmed});
 }
 
 fn buildRequestBody(
@@ -184,6 +203,55 @@ pub fn parseResponse(allocator: Allocator, body: []const u8) !provider.ChatRespo
 // ──────────────────────────────────────────────────────────────────
 // Tests
 // ──────────────────────────────────────────────────────────────────
+
+test "buildChatUrl returns default when base_url is null" {
+    const a = std.testing.allocator;
+    const url = try buildChatUrl(a, null);
+    defer a.free(url);
+    try std.testing.expectEqualStrings(DEFAULT_API_URL, url);
+}
+
+test "buildChatUrl returns default when base_url is empty" {
+    const a = std.testing.allocator;
+    const url = try buildChatUrl(a, "");
+    defer a.free(url);
+    try std.testing.expectEqualStrings(DEFAULT_API_URL, url);
+}
+
+test "buildChatUrl appends chat/completions to v1 base" {
+    const a = std.testing.allocator;
+    const url = try buildChatUrl(a, "https://openrouter.ai/api/v1");
+    defer a.free(url);
+    try std.testing.expectEqualStrings("https://openrouter.ai/api/v1/chat/completions", url);
+}
+
+test "buildChatUrl appends chat/completions to non-v1 path (e.g. ZAI v4)" {
+    const a = std.testing.allocator;
+    const url = try buildChatUrl(a, "https://api.z.ai/api/coding/paas/v4");
+    defer a.free(url);
+    try std.testing.expectEqualStrings("https://api.z.ai/api/coding/paas/v4/chat/completions", url);
+}
+
+test "buildChatUrl trims trailing slash before appending" {
+    const a = std.testing.allocator;
+    const url = try buildChatUrl(a, "http://localhost:11434/v1/");
+    defer a.free(url);
+    try std.testing.expectEqualStrings("http://localhost:11434/v1/chat/completions", url);
+}
+
+test "buildChatUrl uses base as-is when already a chat-completions URL" {
+    const a = std.testing.allocator;
+    const url = try buildChatUrl(a, "https://api.together.xyz/v1/chat/completions");
+    defer a.free(url);
+    try std.testing.expectEqualStrings("https://api.together.xyz/v1/chat/completions", url);
+}
+
+test "buildChatUrl handles non-v1 full chat-completions URLs" {
+    const a = std.testing.allocator;
+    const url = try buildChatUrl(a, "https://example.com/foo/chat/completions");
+    defer a.free(url);
+    try std.testing.expectEqualStrings("https://example.com/foo/chat/completions", url);
+}
 
 test "parseResponse text content" {
     const a = std.testing.allocator;

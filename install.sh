@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-REPO="colus001/pls"
+REPO="eidenz/pls"
 INSTALL_DIR="/usr/local/bin"
 BINARY="pls"
 

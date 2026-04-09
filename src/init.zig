@@ -21,7 +21,8 @@ pub fn runSetup(allocator: Allocator) !void {
     try out.writeAll("    \x1b[1m2\x1b[0m) Anthropic (Claude)\n");
     try out.writeAll("    \x1b[1m3\x1b[0m) OpenAI (GPT)\n");
     try out.writeAll("    \x1b[1m4\x1b[0m) Google Gemini\n");
-    try out.writeAll("    \x1b[1m5\x1b[0m) Ollama (local)\n\n");
+    try out.writeAll("    \x1b[1m5\x1b[0m) Ollama (local)\n");
+    try out.writeAll("    \x1b[1m6\x1b[0m) Custom (OpenAI-compatible endpoint)\n\n");
     try out.writeAll("  Choice [1]: ");
 
     const provider_choice = try readLine(stdin);
@@ -35,6 +36,8 @@ pub fn runSetup(allocator: Allocator) !void {
         .gemini
     else if (std.mem.eql(u8, provider_choice, "5"))
         .ollama
+    else if (std.mem.eql(u8, provider_choice, "6"))
+        .custom
     else blk: {
         try out.writeAll("  Invalid choice, defaulting to free tier.\n");
         break :blk .proxy;
@@ -85,6 +88,25 @@ pub fn runSetup(allocator: Allocator) !void {
             if (try chooseModel(&models.OLLAMA_MODELS, stdin, out)) |m| {
                 cfg.ollama_model = try cfg.ownString(m);
             }
+        },
+        .custom => {
+            try out.writeAll("  Base URL of the OpenAI-compatible endpoint (include the version path)\n");
+            try out.writeAll("  Examples:\n");
+            try out.writeAll("    https://openrouter.ai/api/v1\n");
+            try out.writeAll("    https://api.together.xyz/v1\n");
+            try out.writeAll("    https://api.z.ai/api/coding/paas/v4\n");
+            try out.writeAll("    http://localhost:1234/v1\n");
+            try out.writeAll("  Base URL: ");
+            const base_url = try readLine(stdin);
+            if (base_url.len > 0) cfg.custom_base_url = try cfg.ownString(base_url);
+
+            try out.writeAll("  API key (leave blank if your endpoint does not require one): ");
+            const key = try readLineMasked(stdin);
+            if (key.len > 0) cfg.custom_api_key = try cfg.ownString(key);
+
+            try out.writeAll("  Model name (e.g. anthropic/claude-3.5-sonnet, gpt-4o, glm-4.6): ");
+            const model = try readLine(stdin);
+            if (model.len > 0) cfg.custom_model = try cfg.ownString(model);
         },
     }
 

@@ -187,7 +187,7 @@ fn runTask(
         if (config_mod.Provider.fromString(p)) |prov| {
             cfg.provider = prov;
         } else {
-            try stderr.print("Unknown provider: {s} (expected: proxy, anthropic, openai, gemini, ollama)\n", .{p});
+            try stderr.print("Unknown provider: {s} (expected: proxy, anthropic, openai, gemini, ollama, custom)\n", .{p});
             return;
         }
     }
@@ -200,6 +200,7 @@ fn runTask(
             .openai => cfg.openai_model = owned,
             .gemini => cfg.gemini_model = owned,
             .ollama => cfg.ollama_model = owned,
+            .custom => cfg.custom_model = owned,
         }
     }
 
@@ -238,6 +239,8 @@ fn runTask(
         }
         switch (err) {
             error.NoApiKey => try stderr.writeAll("Run `pls init` to configure your API key.\n"),
+            error.NoBaseUrl => try stderr.writeAll("No base URL configured for the custom provider. Run `pls config` to set one.\n"),
+            error.NoModel => try stderr.writeAll("No model configured for the custom provider. Run `pls config` to set one.\n"),
             error.HttpError => try stderr.writeAll("Failed to connect to the LLM API. Check your network.\n"),
             error.ApiError => try stderr.writeAll("The LLM API returned an error. Check your API key and model.\n"),
             error.RateLimited => printSponsorMessage(stderr),
@@ -552,9 +555,17 @@ fn showConfig(allocator: std.mem.Allocator, stdout: anytype, stderr: anytype) !v
             try stdout.print("  proxy_url     = {s}\n", .{cfg.proxy_url});
         } else if (cfg.provider == .ollama) {
             try stdout.print("  ollama_host   = {s}\n", .{cfg.ollama_host});
+        } else if (cfg.provider == .custom) {
+            try stdout.writeAll("  api_key       = (not set, optional)\n");
         } else {
             try stdout.writeAll("  api_key       = (not set)\n");
         }
+    }
+
+    // Show base URL for the custom provider
+    if (cfg.provider == .custom) {
+        const base = if (cfg.custom_base_url.len > 0) cfg.custom_base_url else "(not set)";
+        try stdout.print("  base_url      = {s}\n", .{base});
     }
 
     // Show admin_key masked (only when set)
@@ -628,7 +639,7 @@ fn printUsage(out: anytype) !void {
         \\  Options:
         \\    --confirm <mode>        Set confirmation mode: all, destructive, none
         \\    --yes, -y               Shorthand for --confirm=none
-        \\    --provider <name>       Override LLM provider (proxy, anthropic, openai, gemini, ollama)
+        \\    --provider <name>       Override LLM provider (proxy, anthropic, openai, gemini, ollama, custom)
         \\    --model <name>          Override model name
         \\    --max-turns <n>         Maximum agent turns (default: 20)
         \\    --dry-run               Show commands without executing them

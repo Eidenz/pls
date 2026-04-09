@@ -499,6 +499,20 @@ pub const Agent = struct {
                 &TOOLS,
                 self.cfg.ollama_host,
             ),
+            .custom => blk: {
+                if (self.cfg.custom_base_url.len == 0) return error.NoBaseUrl;
+                if (self.cfg.custom_model.len == 0) return error.NoModel;
+                // API key is optional — pass through whatever is set (may be null).
+                break :blk openai.chat(
+                    self.allocator,
+                    self.cfg.custom_api_key,
+                    self.cfg.custom_model,
+                    self.system_prompt,
+                    self.messages.items,
+                    &TOOLS,
+                    self.cfg.custom_base_url,
+                );
+            },
         };
     }
 

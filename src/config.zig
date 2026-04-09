@@ -29,6 +29,7 @@ pub const Provider = enum {
     openai,
     gemini,
     ollama,
+    custom,
 
     pub fn fromString(s: []const u8) ?Provider {
         if (std.mem.eql(u8, s, "proxy")) return .proxy;
@@ -36,6 +37,7 @@ pub const Provider = enum {
         if (std.mem.eql(u8, s, "openai")) return .openai;
         if (std.mem.eql(u8, s, "gemini")) return .gemini;
         if (std.mem.eql(u8, s, "ollama")) return .ollama;
+        if (std.mem.eql(u8, s, "custom")) return .custom;
         return null;
     }
 
@@ -46,14 +48,28 @@ pub const Provider = enum {
             .openai => "openai",
             .gemini => "gemini",
             .ollama => "ollama",
+            .custom => "custom",
         };
     }
 
-    /// Returns true if this provider requires an API key.
+    /// Returns true if this provider requires an API key for the agent to start.
+    /// Note: `custom` returns false because some OpenAI-compatible endpoints
+    /// (LM Studio, local vLLM) do not need a key. The API call will surface
+    /// auth errors at runtime if the user's endpoint actually needs one.
     pub fn requiresApiKey(self: Provider) bool {
         return switch (self) {
-            .proxy, .ollama => false,
+            .proxy, .ollama, .custom => false,
             .anthropic, .openai, .gemini => true,
+        };
+    }
+
+    /// Returns true if this provider has an API key field at all (whether
+    /// or not it is required). Used by the config editor to decide whether
+    /// to expose an `api_key` menu item.
+    pub fn usesApiKey(self: Provider) bool {
+        return switch (self) {
+            .proxy, .ollama => false,
+            .anthropic, .openai, .gemini, .custom => true,
         };
     }
 };
@@ -79,6 +95,18 @@ pub const Config = struct {
 
     ollama_host: []const u8 = "http://localhost:11434",
     ollama_model: []const u8 = models.DEFAULT_OLLAMA_MODEL,
+
+    /// Custom OpenAI-compatible provider. `custom_base_url` should include
+    /// the full path up to (but not including) `/chat/completions`. Examples:
+    ///   - https://openrouter.ai/api/v1
+    ///   - https://api.together.xyz/v1
+    ///   - https://api.z.ai/api/coding/paas/v4   (ZAI uses v4, not v1)
+    ///   - http://localhost:1234/v1
+    /// `/chat/completions` is appended automatically unless the URL already
+    /// ends with it. The API key is optional.
+    custom_base_url: []const u8 = "",
+    custom_api_key: ?[]const u8 = null,
+    custom_model: []const u8 = models.DEFAULT_CUSTOM_MODEL,
 
     /// Admin key for proxy management endpoints (e.g. rate-limit reset).
     /// Set via config file or ADMIN_KEY env var.
@@ -110,6 +138,7 @@ pub const Config = struct {
             .openai => self.openai_api_key,
             .gemini => self.gemini_api_key,
             .ollama => null,
+            .custom => self.custom_api_key,
         };
     }
 
@@ -121,6 +150,7 @@ pub const Config = struct {
             .openai => self.openai_model,
             .gemini => self.gemini_model,
             .ollama => self.ollama_model,
+            .custom => self.custom_model,
         };
     }
 
@@ -132,6 +162,7 @@ pub const Config = struct {
             .openai => "https://api.openai.com",
             .gemini => "https://generativelanguage.googleapis.com",
             .ollama => self.ollama_host,
+            .custom => self.custom_base_url,
         };
     }
 
@@ -170,6 +201,12 @@ pub const Config = struct {
             self.ollama_host = try self.ownString(value);
         } else if (std.mem.eql(u8, key, "ollama_model")) {
             self.ollama_model = try self.ownString(value);
+        } else if (std.mem.eql(u8, key, "custom_base_url")) {
+            self.custom_base_url = try self.ownString(value);
+        } else if (std.mem.eql(u8, key, "custom_api_key")) {
+            self.custom_api_key = try self.ownString(value);
+        } else if (std.mem.eql(u8, key, "custom_model")) {
+            self.custom_model = try self.ownString(value);
         } else if (std.mem.eql(u8, key, "admin_key")) {
             self.admin_key = try self.ownString(value);
         }
@@ -286,6 +323,15 @@ fn applyEnvOverrides(cfg: *Config) !void {
     if (std.posix.getenv("OLLAMA_MODEL")) |v| {
         cfg.ollama_model = try cfg.ownString(v);
     }
+    if (std.posix.getenv("PLS_CUSTOM_BASE_URL")) |v| {
+        cfg.custom_base_url = try cfg.ownString(v);
+    }
+    if (std.posix.getenv("PLS_CUSTOM_API_KEY")) |v| {
+        cfg.custom_api_key = try cfg.ownString(v);
+    }
+    if (std.posix.getenv("PLS_CUSTOM_MODEL")) |v| {
+        cfg.custom_model = try cfg.ownString(v);
+    }
     if (std.posix.getenv("ADMIN_KEY")) |v| {
         cfg.admin_key = try cfg.ownString(v);
     }
@@ -319,6 +365,7 @@ test "Provider.fromString returns correct variants" {
     try std.testing.expectEqual(Provider.openai, Provider.fromString("openai").?);
     try std.testing.expectEqual(Provider.gemini, Provider.fromString("gemini").?);
     try std.testing.expectEqual(Provider.ollama, Provider.fromString("ollama").?);
+    try std.testing.expectEqual(Provider.custom, Provider.fromString("custom").?);
 }
 
 test "Provider.fromString returns null for unknown" {
@@ -328,9 +375,27 @@ test "Provider.fromString returns null for unknown" {
 }
 
 test "Provider round-trip" {
-    inline for (.{ Provider.proxy, Provider.anthropic, Provider.openai, Provider.gemini, Provider.ollama }) |p| {
+    inline for (.{ Provider.proxy, Provider.anthropic, Provider.openai, Provider.gemini, Provider.ollama, Provider.custom }) |p| {
         try std.testing.expectEqual(p, Provider.fromString(p.toString()).?);
     }
+}
+
+test "Provider.requiresApiKey behaviour" {
+    try std.testing.expect(!Provider.proxy.requiresApiKey());
+    try std.testing.expect(!Provider.ollama.requiresApiKey());
+    try std.testing.expect(!Provider.custom.requiresApiKey());
+    try std.testing.expect(Provider.anthropic.requiresApiKey());
+    try std.testing.expect(Provider.openai.requiresApiKey());
+    try std.testing.expect(Provider.gemini.requiresApiKey());
+}
+
+test "Provider.usesApiKey includes custom" {
+    try std.testing.expect(!Provider.proxy.usesApiKey());
+    try std.testing.expect(!Provider.ollama.usesApiKey());
+    try std.testing.expect(Provider.anthropic.usesApiKey());
+    try std.testing.expect(Provider.openai.usesApiKey());
+    try std.testing.expect(Provider.gemini.usesApiKey());
+    try std.testing.expect(Provider.custom.usesApiKey());
 }
 
 test "Config defaults" {
@@ -467,6 +532,9 @@ test "parseTOML handles all fields" {
         \\gemini_model = "gemini-3"
         \\ollama_host = "http://remote:11434"
         \\ollama_model = "qwen"
+        \\custom_base_url = "https://openrouter.ai/api"
+        \\custom_api_key = "sk-or-test"
+        \\custom_model = "anthropic/claude-3.5-sonnet"
     );
 
     try std.testing.expectEqual(Provider.gemini, cfg.provider);
@@ -479,6 +547,23 @@ test "parseTOML handles all fields" {
     try std.testing.expectEqualStrings("gemini-3", cfg.gemini_model);
     try std.testing.expectEqualStrings("http://remote:11434", cfg.ollama_host);
     try std.testing.expectEqualStrings("qwen", cfg.ollama_model);
+    try std.testing.expectEqualStrings("https://openrouter.ai/api", cfg.custom_base_url);
+    try std.testing.expectEqualStrings("sk-or-test", cfg.custom_api_key.?);
+    try std.testing.expectEqualStrings("anthropic/claude-3.5-sonnet", cfg.custom_model);
+}
+
+test "Config.getApiKey/getModel/getBaseUrl for custom" {
+    var cfg = Config.init(std.testing.allocator);
+    defer cfg.deinit();
+
+    cfg.provider = .custom;
+    cfg.custom_base_url = try cfg.ownString("https://openrouter.ai/api");
+    cfg.custom_api_key = try cfg.ownString("sk-or-test");
+    cfg.custom_model = try cfg.ownString("openai/gpt-4o");
+
+    try std.testing.expectEqualStrings("sk-or-test", cfg.getApiKey().?);
+    try std.testing.expectEqualStrings("openai/gpt-4o", cfg.getModel());
+    try std.testing.expectEqualStrings("https://openrouter.ai/api", cfg.getBaseUrl());
 }
 
 test "parseTOML handles extra whitespace" {
@@ -547,7 +632,18 @@ pub fn save(cfg: *const Config, allocator: Allocator) !void {
     try writer.print("gemini_model = \"{s}\"\n\n", .{cfg.gemini_model});
 
     try writer.print("ollama_host = \"{s}\"\n", .{cfg.ollama_host});
-    try writer.print("ollama_model = \"{s}\"\n", .{cfg.ollama_model});
+    try writer.print("ollama_model = \"{s}\"\n\n", .{cfg.ollama_model});
+
+    // Custom OpenAI-compatible provider (only write fields that are set)
+    if (cfg.custom_base_url.len > 0) {
+        try writer.print("custom_base_url = \"{s}\"\n", .{cfg.custom_base_url});
+    }
+    if (cfg.custom_api_key) |key| {
+        try writer.print("custom_api_key = \"{s}\"\n", .{key});
+    }
+    if (cfg.custom_model.len > 0) {
+        try writer.print("custom_model = \"{s}\"\n", .{cfg.custom_model});
+    }
 }
 
 /// Delete the config file, resetting to defaults.
